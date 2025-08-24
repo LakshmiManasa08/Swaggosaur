@@ -14,6 +14,7 @@ const UploadAgent = () => {
   const [testResults, setTestResults] = useState([]);
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState('');
+  const [showTestCases, setShowTestCases] = useState(true);
 
   // Upload success handler - logs backend response and stores in state
   const handleUploadSuccess = (data) => {
@@ -59,6 +60,7 @@ const UploadAgent = () => {
       const response = await runTests(parsedTestCases, swaggerInfo?.swaggerFile);
       if (response.success) {
         setTestResults(response.results);
+        setShowTestCases(false); // Hide test cases after successful test run
       } else {
         setRunError('Failed to run test cases.');
       }
@@ -84,34 +86,62 @@ const UploadAgent = () => {
               onTestCasesGenerated={handleTestCasesGenerated}
             />
 
-            {testCases && (
-              <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-semibold text-gray-900">
-                    Generated Test Cases
-                  </h3>
-                  <div className="flex space-x-4">
-                    <DownloadButton content={testCases} filename="test-cases.md" />
-                    <button
-                      onClick={handleRunTests}
-                      disabled={runLoading}
-                      className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {runLoading ? 'Running...' : 'Run Tests'}
-                    </button>
+            {testCases && showTestCases && (
+              <div className="p-[2px] rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500">
+                <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 p-8 relative overflow-hidden">
+                  {/* Decorative gradient glow */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-100 via-purple-100 to-pink-100 opacity-60 blur-2xl -z-10"></div>
+
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-2xl font-bold text-gray-900">
+                      Generated Test Cases
+                    </h3>
+
+                    {/* Fancy buttons container */}
+                    <div className="flex space-x-4 bg-gradient-to-r from-purple-50 to-blue-50 p-3 rounded-xl shadow-inner border border-purple-200">
+                      <div className="transform transition hover:scale-105">
+                        <DownloadButton content={testCases} filename="test-cases.md" />
+                      </div>
+                      <div className="transform transition hover:scale-105">
+                        <button
+                          onClick={handleRunTests}
+                          disabled={runLoading}
+                          className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold shadow-md hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {runLoading ? 'Running...' : 'Run Tests'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                
-                {runError && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                    <p className="text-red-600">{runError}</p>
+
+                  {runError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                      <p className="text-red-600">{runError}</p>
+                    </div>
+                  )}
+
+                  {/* 🔹 Scrollable test cases container */}
+                  <div className="bg-gray-50 rounded-lg p-6 max-h-96 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap text-lg text-gray-800">
+                      {(() => {
+                        try {
+                          const parsedTestCases = JSON.parse(testCases);
+                          return parsedTestCases.map((testCase, index) => (
+                            <div key={index}>
+                              <span className="font-bold">
+                                Test Case #{index + 1} for Endpoint: {testCase.endpoint}
+                              </span>
+                              <br />
+                              {JSON.stringify(testCase, null, 2)}
+                            </div>
+                          ));
+                        } catch (e) {
+                          console.error("Error parsing test cases for display:", e);
+                          return testCases; // Fallback to raw string if parsing fails
+                        }
+                      })()}
+                    </pre>
                   </div>
-                )}
-                
-                <div className="bg-gray-50 rounded-lg p-6">
-                  <pre className="whitespace-pre-wrap text-sm text-gray-800 overflow-x-auto">
-                    {testCases}
-                  </pre>
                 </div>
               </div>
             )}
@@ -119,6 +149,19 @@ const UploadAgent = () => {
             {testResults.length > 0 && (
               <div className="space-y-8">
                 <StatsBanner results={testResults} />
+                {!showTestCases && (
+                  <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-8">
+                    <h3 className="text-2xl font-semibold text-gray-900 mb-6">
+                      Generated Test Cases
+                    </h3>
+                    <button
+                      onClick={() => setShowTestCases(true)}
+                      className="inline-flex items-center px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+                    >
+                      Show Test Cases
+                    </button>
+                  </div>
+                )}
                 <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-8">
                   <h3 className="text-2xl font-semibold text-gray-900 mb-6">
                     Test Results

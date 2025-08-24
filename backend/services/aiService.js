@@ -9,20 +9,21 @@ function extractEndpointsFromSwagger(specContent) {
     throw new Error('Invalid Swagger spec format');
   }
   if (!spec.paths) throw new Error('No paths found in Swagger spec');
-  let summary = 'API Endpoints:\n';
+
+  let endpoints = [];
+  let endpointCounter = 1;
+
   for (const [path, methods] of Object.entries(spec.paths)) {
-    for (const [method, details] of Object.entries(methods)) {
-      summary += `${method.toUpperCase()} ${path}`;
-      if (details.parameters) {
-        const bodyParam = details.parameters.find(p => p.in === 'body');
-        if (bodyParam && bodyParam.schema) {
-          summary += ` BODY: ${JSON.stringify(bodyParam.schema)}`;
-        }
-      }
-      summary += '\n';
+    for (const [method] of Object.entries(methods)) {
+      endpoints.push({
+        endpointNumber: endpointCounter,
+        method: method.toUpperCase(),
+        path
+      });
+      endpointCounter++;
     }
   }
-  return summary;
+  return endpoints;
 }
 
 function extractJsonArray(text) {
@@ -38,65 +39,59 @@ function extractJsonArray(text) {
 }
 
 async function generateTestCases(specContent, testType = 'comprehensive') {
-  let endpointsSummary;
+  let endpoints = [];
   let baseUrl = '';
-  
+
   try {
+    // Parse Swagger spec
     const spec = JSON.parse(specContent);
-    endpointsSummary = extractEndpointsFromSwagger(specContent);
-    
-    // Extract base URL from the spec
-    if (spec.servers && Array.isArray(spec.servers) && spec.servers.length > 0) {
-      // OpenAPI 3.x format
+    endpoints = extractEndpointsFromSwagger(specContent);
+
+    // Extract base URL
+    if (spec.servers?.length > 0) {
       baseUrl = spec.servers[0].url;
     } else if (spec.host) {
-      // Swagger 2.0 format
-      const scheme = (spec.schemes && spec.schemes[0]) || 'https';
+      const scheme = (spec.schemes?.[0]) || 'https';
       baseUrl = `${scheme}://${spec.host}${spec.basePath || ''}`;
     }
-    
-    // Check if the base URL is a placeholder and replace with working alternatives
-    const isPlaceholderUrl = baseUrl && (
-      baseUrl.includes('api.example.com') || 
-      baseUrl.includes('example.com') || 
-      baseUrl.includes('placeholder.com') ||
-      baseUrl.includes('mock.com')
-    );
-    
-    if (isPlaceholderUrl) {
-      console.log('Detected placeholder URL in AI service:', baseUrl);
-      // Replace with working API endpoints for test generation
-      if (baseUrl.includes('/v1') || baseUrl.includes('/users')) {
-        baseUrl = 'https://jsonplaceholder.typicode.com';
-      } else if (baseUrl.includes('/products')) {
-        baseUrl = 'https://dummyjson.com';
-      } else {
-        baseUrl = 'https://jsonplaceholder.typicode.com';
-      }
-      console.log('Replaced with working API for test generation:', baseUrl);
+
+    // Replace placeholder URLs
+    if (baseUrl?.includes('example.com') || baseUrl?.includes('placeholder.com') || baseUrl?.includes('mock.com')) {
+      console.log('Detected placeholder URL:', baseUrl);
+      baseUrl = 'https://jsonplaceholder.typicode.com';
+      console.log('Replaced with working API:', baseUrl);
     }
-  } catch (e) {
-    throw new Error('Failed to extract endpoints: ' + e.message);
+
+    // If no endpoints found, return empty array early
+    if (!endpoints.length) {
+      console.warn('No endpoints found in Swagger spec');
+      return [];
+    }
+
+  } catch (err) {
+    console.error('Swagger parsing error:', err.message);
+    return [];
   }
 
-  // Use real AI model to generate test cases
-  console.log('Using real AI model for test case generation');
-  
-  const baseUrlInfo = baseUrl ? `\nBase URL: ${baseUrl}\n` : '';
-  const prompt = `Generate both positive and negative ${testType} test cases for the following API endpoints.${baseUrlInfo}For each test case, provide: method, endpoint, expectedStatus, type (positive or negative), and if applicable, a body object matching the schema, and a headers object for authentication or custom headers. Include negative cases for missing/invalid fields, unauthorized, and forbidden access if the endpoint requires authentication.
+  // Build prompt dynamically
+  const methodsWithBody = ['POST', 'PUT', 'PATCH'];
+  const prompt = `
+Generate structured API test cases in JSON format. Include dynamic requestBody for POST/PUT/PATCH.
 
-CRITICAL INSTRUCTIONS:
-1. If a base URL is provided above, use it to construct full URLs for the endpoints (e.g., if base URL is "https://petstore.swagger.io/v2" and endpoint is "/pet/1", use "https://petstore.swagger.io/v2/pet/1")
-2. If no base URL is provided, use relative paths starting with / (e.g., "/pet/1", "/users/123")
-3. NEVER use placeholder URLs like "api.example.com" or "example.com" - always use the actual base URL provided or relative paths
-4. The endpoint field should contain the full URL (if base URL provided) or the relative path (if no base URL)
-5. For Petstore API, use realistic test data and expect realistic responses
-6. For JSONPlaceholder API, use endpoints like /users, /posts, /comments, /albums, /photos, /todos
-7. For DummyJSON API, use endpoints like /products, /carts, /users, /posts, /quotes, /todos
+Base URL: ${baseUrl}
 
-Return ONLY the test cases as a valid JSON array of objects, with no extra text, Markdown, or explanation. Do not include any text before or after the JSON array.
+Endpoints:
+${endpoints.map(ep => `${ep.method} ${ep.path}`).join("\n")}
 
-${endpointsSummary}`;
+Requirements:
+- Each endpoint object must have:
+  "endpointNumber", "endpointName", "description", "testCases"
+- Each testCase should have:
+  "caseNumber", "type", "method", "endpoint", "expectedStatus", "description"
+- Include "requestBody" only for POST/PUT/PATCH with realistic JSON data.
+- Reset caseNumber to 1 for each endpoint.
+- Return ONLY valid JSON array. No markdown or extra text.
+`;
 
   try {
     const response = await axios.post(
@@ -104,214 +99,33 @@ ${endpointsSummary}`;
       {
         model: config.QWEN3_MODEL,
         messages: [
-          { role: 'system', content: 'You are an expert API testing engineer. CRITICAL: Always use the actual base URL provided in the prompt for generating test cases. NEVER use placeholder URLs like api.example.com, example.com, or any other placeholder domains. If a base URL is provided, construct full URLs by combining the base URL with the endpoint path. If no base URL is provided, use relative paths starting with /. For Petstore API (petstore.swagger.io), use realistic test data and expect realistic responses. For JSONPlaceholder API (jsonplaceholder.typicode.com), use endpoints like /users, /posts, /comments, /albums, /photos, /todos. For DummyJSON API (dummyjson.com), use endpoints like /products, /carts, /users, /posts, /quotes, /todos.' },
+          { role: 'system', content: 'You are an expert API testing engineer. Return only JSON as requested.' },
           { role: 'user', content: prompt }
         ],
-        max_tokens: 4000,
-        temperature: 0.7,
-        top_p: 0.9,
+        max_tokens: 5000,
+        temperature: 0.6,
+        top_p: 0.9
       },
       {
         headers: { Authorization: `Bearer ${config.OPENROUTER_API_KEY}` },
-        timeout: config.AI_TIMEOUT,
+        timeout: config.AI_TIMEOUT
       }
     );
 
-    // Post-process: extract the first JSON array from the AI response
-    const aiText = response.data.choices[0].message.content;
+    const aiText = response.data.choices?.[0]?.message?.content;
+    if (!aiText) throw new Error('Empty AI response');
+
+    // Parse AI JSON safely
     try {
-      const testCasesArray = extractJsonArray(aiText);
-      return testCasesArray;
-    } catch (err) {
-      console.error('AI raw output (for debugging):', aiText);
-      throw new Error('Failed to parse JSON array from AI response. Raw output: ' + aiText);
-    }
-  } catch (error) {
-    console.error('AI API call failed:', error.message);
-    console.log('Falling back to mock test cases for development/testing');
-    
-    // Fallback to mock test cases if AI fails
-    const mockTestCases = [];
-    
-    // Add test cases based on the actual Petstore API behavior
-    if (baseUrl && baseUrl.includes('petstore.swagger.io')) {
-      // Petstore API test cases
-      mockTestCases.push(
-        {
-          method: "GET",
-          endpoint: `${baseUrl}/pet/1`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Get pet by ID - valid ID"
-        },
-        {
-          method: "GET", 
-          endpoint: `${baseUrl}/pet/999999999`,
-          expectedStatus: 404,
-          type: "negative",
-          description: "Get pet by ID - invalid ID"
-        },
-        {
-          method: "POST",
-          endpoint: `${baseUrl}/pet`,
-          expectedStatus: 200,
-          type: "positive",
-          body: {
-            id: 12345,
-            category: { id: 1, name: "dogs" },
-            name: "test-pet",
-            photoUrls: ["string"],
-            tags: [{ id: 0, name: "string" }],
-            status: "available"
-          },
-          description: "Create new pet - valid data"
-        },
-        {
-          method: "POST",
-          endpoint: `${baseUrl}/pet`,
-          expectedStatus: 200,
-          type: "positive",
-          body: {},
-          description: "Create new pet - minimal data (API accepts empty objects)"
-        },
-        {
-          method: "PUT",
-          endpoint: `${baseUrl}/pet/1`,
-          expectedStatus: 200,
-          type: "positive",
-          body: {
-            id: 1,
-            category: { id: 1, name: "dogs" },
-            name: "updated-pet",
-            photoUrls: ["string"],
-            tags: [{ id: 0, name: "string" }],
-            status: "sold"
-          },
-          description: "Update pet - valid data"
-        },
-        {
-          method: "DELETE",
-          endpoint: `${baseUrl}/pet/1`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Delete pet - valid ID"
-        },
-        {
-          method: "GET",
-          endpoint: `${baseUrl}/pet/findByStatus?status=available`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Find pets by status - available"
-        },
-        {
-          method: "GET",
-          endpoint: `${baseUrl}/store/inventory`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Get store inventory"
-        },
-        {
-          method: "POST",
-          endpoint: `${baseUrl}/store/order`,
-          expectedStatus: 200,
-          type: "positive",
-          body: {
-            id: 10,
-            petId: 198772,
-            quantity: 7,
-            shipDate: "2023-12-07T10:00:00.000Z",
-            status: "approved",
-            complete: true
-          },
-          description: "Place order - valid data"
-        },
-        {
-          method: "GET",
-          endpoint: `${baseUrl}/user/user1`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Get user by username"
-        },
-        {
-          method: "GET",
-          endpoint: `${baseUrl}/nonexistent/endpoint`,
-          expectedStatus: 404,
-          type: "negative",
-          description: "Access non-existent endpoint"
-        }
-      );
-    } else if (baseUrl && baseUrl.includes('jsonplaceholder.typicode.com')) {
-      // JSONPlaceholder API test cases
-      mockTestCases.push(
-        {
-          method: "GET",
-          endpoint: `${baseUrl}/users/1`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Get user by ID - valid ID"
-        },
-        {
-          method: "GET", 
-          endpoint: `${baseUrl}/users/999`,
-          expectedStatus: 404,
-          type: "negative",
-          description: "Get user by ID - invalid ID"
-        },
-        {
-          method: "POST",
-          endpoint: `${baseUrl}/users`,
-          expectedStatus: 201,
-          type: "positive",
-          body: {
-            name: "John Doe",
-            username: "johndoe",
-            email: "john@example.com"
-          },
-          description: "Create new user - valid data"
-        },
-        {
-          method: "PUT",
-          endpoint: `${baseUrl}/users/1`,
-          expectedStatus: 200,
-          type: "positive",
-          body: {
-            id: 1,
-            name: "Updated User",
-            username: "updateduser",
-            email: "updated@example.com"
-          },
-          description: "Update user - valid data"
-        },
-        {
-          method: "DELETE",
-          endpoint: `${baseUrl}/users/1`,
-          expectedStatus: 200,
-          type: "positive",
-          description: "Delete user - valid ID"
-        }
-      );
-    } else {
-      // Generic test cases for unknown APIs
-      mockTestCases.push(
-        {
-          method: "GET",
-          endpoint: baseUrl ? `${baseUrl}/test` : "/test",
-          expectedStatus: 200,
-          type: "positive",
-          description: "Basic GET test"
-        },
-        {
-          method: "POST",
-          endpoint: baseUrl ? `${baseUrl}/test` : "/test",
-          expectedStatus: 201,
-          type: "positive",
-          body: { test: "data" },
-          description: "Basic POST test"
-        }
-      );
+      return extractJsonArray(aiText);
+    } catch (parseErr) {
+      console.error('AI raw output:', aiText);
+      return [];
     }
 
-    return mockTestCases;
+  } catch (err) {
+    console.error('AI API call failed:', err.message);
+    return [];
   }
 }
 

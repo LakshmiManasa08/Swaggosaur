@@ -1,7 +1,7 @@
 
 import requests
 
-API_KEY = "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"  # Replace with your actual OpenRouter API key
+API_KEY = "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"  # Replace with your actual OpenRouter API key
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 def ask_openrouter(prompt):
@@ -11,7 +11,7 @@ def ask_openrouter(prompt):
     }
 
     payload = {
-        "model": "qwen/qwen3-coder",  # Note the correct model identifier format
+        "model": "meta-llama/llama-3.2-3b-instruct:free",  # Note the correct model identifier format
         "messages": [
             {"role": "user", "content": prompt}
         ],
